@@ -212,7 +212,9 @@ def main(args, local_rank):
 
             if global_step == 0:
                 model.save(args.save_dir, 'epoch%d-step%d'%(epoch, global_step))
-
+            
+            #breakpoint()
+            original_input_ids_enc = input_ids_enc
             input_ids_enc = noiser.noise(input_ids_enc)
             input_ids_dec_cls = {'BertTokenizer': input_ids_enc, 'GPT2Tokenizer': input_ids_dec}
             batch = (input_ids_enc, input_ids_dec_cls[tokenizer_name], ) + batch[2:]
@@ -238,6 +240,7 @@ def main(args, local_rank):
 
 
             if args.world_size == 1 or (dist.get_rank() == 0):
+                #breakpoint()
                 # tensorboard
                 writer.add_scalar('loss/loss', loss.item() , global_step)
                 writer.add_scalar('loss/LR', optimizer.param_groups[0]['lr'], global_step)
@@ -245,7 +248,10 @@ def main(args, local_rank):
                 writer.add_scalar('hidden/h_std', h.std().item() , global_step)
                 writer.add_scalar('hidden/positive_ratio', (h>0).sum()/h.shape.numel(), global_step)
 
-                if global_step % args.val_interval == -1 % args.val_interval:
+                if global_step % args.val_interval == 0:
+                    #print('evaluation_cycle')
+                    #breakpoint()
+                    
                     model.eval()
                     eval_loss, eval_ppl, eval_mid_ppl, _, rouge_l, bleu = eval_model_loss(model, gpt_model, gpt_tokenizer, global_step, eval_dataloader, noiser, device, logger, max_valid_size=args.valid_size, onlypart=True, ground=args.ground)
 
@@ -270,12 +276,13 @@ def main(args, local_rank):
                     writer_eval.add_scalar('metric/clean_bleu', clean_bleu, global_step)
                     writer_eval.add_scalar('metric/robust_bleu', robust_bleu, global_step)
                     
-                    
-                    if global_step % args.save_interval == 0 % args.save_interval:
+                    #print(global_step)
+                    if global_step % args.save_interval == 0:
+                        #print('saving')
                         model.save(args.save_dir, 'epoch%d-step%d-ppl%.3f-bleu%.1f'%(epoch, global_step, eval_ppl, bleu))
                     model.train()
 
-                if global_step % args.log_interval == -1 % args.log_interval:
+                if global_step % args.log_interval == 0:
                     ppl = torch.exp((tr_loss/tr_tokens).clone().detach()).item()
                     logger.info('Training:')
                     logger.info('Epoch: {}, '
@@ -284,7 +291,7 @@ def main(args, local_rank):
                         'Loss: {}, PPL: {}'.format(epoch, global_step, tr_correct/tr_tokens, loss.item(), ppl))
                     
                     rand_id = torch.randint(input_ids_enc.shape[0], (1,))
-                    input_sentence = model.decode(input_ids_enc[rand_id,:])
+                    input_sentence = model.decode(original_input_ids_enc[rand_id,:])
                     input_sentence_corrupted = model.decode(input_ids_enc[rand_id,:])
                     predict_sentence = model.generate_from(h[rand_id,:])
                     
@@ -294,7 +301,6 @@ def main(args, local_rank):
                     logger.info(input_sentence_corrupted[0].strip())
                     logger.info("Output Sentence:")
                     logger.info(predict_sentence[0].strip())
-                    
                     
                     tr_loss, tr_correct, tr_tokens = 0., 0., 0
     
